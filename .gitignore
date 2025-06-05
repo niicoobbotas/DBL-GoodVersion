@@ -1,3 +1,6 @@
+# Ignore data directory
+data/
+
 # Python
 __pycache__/
 *.py[cod]
