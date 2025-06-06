@@ -105,24 +105,24 @@ for stage, col in zip(stages, ['start_sentiment', 'middle_sentiment', 'end_senti
         node_indices[(stage, sentiment)] = len(node_labels)
         node_labels.append(label)
 
-# Initialize lists for Sankey diagram
+
 sources = []
 targets = []
 values = []
 
-# Define colors for each sentiment (with alpha for links)
+
 sentiment_colors = {
-    'positive': '#2ca02c',  # green
-    'neutral': '#ff7f0e',   # orange
-    'negative': '#d62728'   # red
+    'positive': '#2ca02c', 
+    'neutral': '#ff7f0e',   
+    'negative': '#d62728'   
 }
 sentiment_link_colors = {
-    'positive': 'rgba(44, 160, 44, 0.4)',   # green, 40% opacity
-    'neutral': 'rgba(255, 127, 14, 0.4)',  # orange, 40% opacity
-    'negative': 'rgba(214, 39, 40, 0.4)'   # red, 40% opacity
+    'positive': 'rgba(44, 160, 44, 0.08)',   
+    'neutral': 'rgba(255, 127, 14, 0.08)',  
+    'negative': 'rgba(214, 39, 40, 0.08)'   
 }
 
-# Create links between stages
+
 for _, row in df.iterrows():
     source_idx = node_indices[('Start', row['start_sentiment'])]
     target_idx = node_indices[('Middle', row['middle_sentiment'])]
@@ -154,7 +154,7 @@ fig = go.Figure(data=[go.Sankey(
 )])
 
 fig.update_layout(
-    title_text="User Tweet Sentiment Flow Across Conversation Stages<br>(Excluding Airline Replies)",
+    title_text="User Tweet Sentiment Flow Across Conversation Stages",
     font_size=12,
     height=800
 )
