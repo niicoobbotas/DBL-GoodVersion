@@ -2,7 +2,6 @@ import os
 from sqlalchemy import create_engine
 import pandas as pd
 import plotly.graph_objects as go
-import numpy as np
 
 # List of airline user IDs
 airline_ids = {
@@ -44,21 +43,6 @@ conversation_stages AS (
             PARTITION BY conversation_id 
             ORDER BY created_at
         ) as start_sentiment,
-        -- middle tweet
-        CASE 
-            WHEN COUNT(*) OVER (PARTITION BY conversation_id) = 2 THEN
-                LAST_VALUE(sentiment) OVER (
-                    PARTITION BY conversation_id 
-                    ORDER BY created_at
-                    ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
-                )
-            ELSE
-                NTH_VALUE(sentiment, 2) OVER (
-                    PARTITION BY conversation_id 
-                    ORDER BY created_at
-                    ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
-                )
-        END as middle_sentiment,
         -- last tweet
         LAST_VALUE(sentiment) OVER (
             PARTITION BY conversation_id 
@@ -70,7 +54,6 @@ conversation_stages AS (
 SELECT DISTINCT
     conversation_id,
     start_sentiment,
-    middle_sentiment,
     end_sentiment
 FROM conversation_stages
 ORDER BY conversation_id;
@@ -80,61 +63,53 @@ ORDER BY conversation_id;
 with engine.connect() as conn:
     df = pd.read_sql(query, conn)
 
-# Create nodes for each stage and sentiment
-stages = ['Start', 'Middle', 'End']
-
-# Define sentiment order (positive at top, neutral middle, negative bottom)
-sentiment_order = ['positive', 'neutral', 'negative']
-sentiments = [s for s in sentiment_order if s in df['start_sentiment'].unique()]
-
-# Calculate percentages for each stage
-total_conversations = len(df)
-stage_percentages = {
-    'Start': df['start_sentiment'].value_counts(normalize=True) * 100,
-    'Middle': df['middle_sentiment'].value_counts(normalize=True) * 100,
-    'End': df['end_sentiment'].value_counts(normalize=True) * 100
+# Colorblind-friendly palette
+sentiment_colors = {
+    'positive': '#0072B2',  # Blue
+    'neutral': '#E69F00',   # Orange
+    'negative': '#D55E00'   # Red-Orange
 }
 
-# Create node labels and indices only for combinations that exist in the data
+# Get unique sentiments
+sentiments = ['positive', 'neutral', 'negative']
+
+# Calculate percentages for each stage
+start_percentages = df['start_sentiment'].value_counts(normalize=True) * 100
+end_percentages = df['end_sentiment'].value_counts(normalize=True) * 100
+
+# Create node labels and indices with percentages
 node_labels = []
 node_indices = {}
-for stage, col in zip(stages, ['start_sentiment', 'middle_sentiment', 'end_sentiment']):
-    for sentiment in df[col].unique():
-        percentage = stage_percentages[stage].get(sentiment, 0)
-        label = f"{stage} - {sentiment} ({percentage:.1f}%)"
-        node_indices[(stage, sentiment)] = len(node_labels)
-        node_labels.append(label)
+for stage, col, percentages in zip(['Start', 'End'], ['start_sentiment', 'end_sentiment'], [start_percentages, end_percentages]):
+    for sentiment in sentiments:
+        if sentiment in df[col].unique():
+            pct = percentages.get(sentiment, 0)
+            label = f"{sentiment.capitalize()} ({pct:.1f}%)"
+            node_indices[(stage, sentiment)] = len(node_labels)
+            node_labels.append(label)
 
+# Aggregate transitions
+links_df = df.groupby(['start_sentiment', 'end_sentiment']).size().reset_index(name='value')
 
 sources = []
 targets = []
 values = []
+link_colors = []
+for _, row in links_df.iterrows():
+    s_idx = node_indices[('Start', row['start_sentiment'])]
+    e_idx = node_indices[('End', row['end_sentiment'])]
+    sources.append(s_idx)
+    targets.append(e_idx)
+    values.append(row['value'])
+    # Color by start sentiment
+    color = sentiment_colors[row['start_sentiment']]
+    link_colors.append(f'rgba({int(color[1:3],16)},{int(color[3:5],16)},{int(color[5:7],16)},0.5)')
 
-
-sentiment_colors = {
-    'positive': '#2ca02c', 
-    'neutral': '#ff7f0e',   
-    'negative': '#d62728'   
-}
-sentiment_link_colors = {
-    'positive': 'rgba(44, 160, 44, 0.08)',   
-    'neutral': 'rgba(255, 127, 14, 0.08)',  
-    'negative': 'rgba(214, 39, 40, 0.08)'   
-}
-
-
-for _, row in df.iterrows():
-    source_idx = node_indices[('Start', row['start_sentiment'])]
-    target_idx = node_indices[('Middle', row['middle_sentiment'])]
-    sources.append(source_idx)
-    targets.append(target_idx)
-    values.append(1)
-    
-    source_idx = node_indices[('Middle', row['middle_sentiment'])]
-    target_idx = node_indices[('End', row['end_sentiment'])]
-    sources.append(source_idx)
-    targets.append(target_idx)
-    values.append(1)
+# Node colors
+node_colors = []
+for label in node_labels:
+    sentiment = label.split(' ')[0].lower()
+    node_colors.append(sentiment_colors[sentiment])
 
 # Create Sankey diagram
 fig = go.Figure(data=[go.Sankey(
@@ -143,22 +118,21 @@ fig = go.Figure(data=[go.Sankey(
         thickness=20,
         line=dict(color="black", width=0.5),
         label=node_labels,
-        color=[sentiment_colors[label.split(' - ')[1].split(' (')[0]] for label in node_labels]
+        color=node_colors
     ),
     link=dict(
         source=sources,
         target=targets,
         value=values,
-        color=[sentiment_link_colors[node_labels[source].split(' - ')[1].split(' (')[0]] for source in sources]
+        color=link_colors
     )
 )])
 
 fig.update_layout(
-    title_text="User Tweet Sentiment Flow Across Conversation Stages",
+    title_text="User Tweet Sentiment Flow",
     font_size=12,
     height=800
 )
 
-fig.show()
-
-fig.write_html("sentiment_sankey.html") 
+fig.write_html("src/visualization/sankey diagram/sentiment_sankey.html")
+fig.show() 
