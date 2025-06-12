@@ -13,32 +13,33 @@ PG_HOST     = os.getenv("PG_HOST", "dbl.cjiyqqck0poz.eu-west-1.rds.amazonaws.com
 PG_PORT     = os.getenv("PG_PORT", "5432")
 PG_DB       = os.getenv("PG_DB", "DBL")
 
-# Create database engine
 engine = create_engine(f"postgresql+psycopg2://{PG_USER}:{PG_PASSWORD}@{PG_HOST}:{PG_PORT}/{PG_DB}")
 
-# Query to get conversation stages and sentiments for Lufthansa
+# Query
 query = f"""
 WITH user_tweets AS (
     SELECT 
         t.in_reply_to_status_id as conversation_id,
         t.created_at,
-        c.sentiment
+        c.sentiment_start,
+        c.sentiment_end
     FROM tweets t
     JOIN conversations c ON t.in_reply_to_status_id = c.conversation_id
     WHERE t.in_reply_to_status_id IS NOT NULL
       AND t.user_id = {lufthansa_id}
-      AND c.sentiment IS NOT NULL
+      AND c.sentiment_start IS NOT NULL
+      AND c.sentiment_end IS NOT NULL
 ),
 conversation_stages AS (
     SELECT 
         conversation_id,
         -- first tweet
-        FIRST_VALUE(sentiment) OVER (
+        FIRST_VALUE(sentiment_start) OVER (
             PARTITION BY conversation_id 
             ORDER BY created_at
         ) as start_sentiment,
         -- last tweet
-        LAST_VALUE(sentiment) OVER (
+        LAST_VALUE(sentiment_end) OVER (
             PARTITION BY conversation_id 
             ORDER BY created_at
             ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
@@ -53,11 +54,10 @@ FROM conversation_stages
 ORDER BY conversation_id;
 """
 
-# Execute query and create DataFrame
+# Query and create df
 with engine.connect() as conn:
     df = pd.read_sql(query, conn)
 
-# Colorblind-friendly palette
 sentiment_colors = {
     'positive': '#0072B2',  # Blue
     'neutral': '#E69F00',   # Orange
@@ -66,11 +66,11 @@ sentiment_colors = {
 
 sentiments = ['positive', 'neutral', 'negative']
 
-# Calculate percentages for each stage
+#  percentages  
 start_percentages = df['start_sentiment'].value_counts(normalize=True) * 100
 end_percentages = df['end_sentiment'].value_counts(normalize=True) * 100
 
-# Create node labels and indices with percentages
+# node labels and indices  
 node_labels = []
 node_indices = {}
 for stage, col, percentages in zip(['Start', 'End'], ['start_sentiment', 'end_sentiment'], [start_percentages, end_percentages]):
@@ -81,7 +81,6 @@ for stage, col, percentages in zip(['Start', 'End'], ['start_sentiment', 'end_se
             node_indices[(stage, sentiment)] = len(node_labels)
             node_labels.append(label)
 
-# Aggregate transitions
 links_df = df.groupby(['start_sentiment', 'end_sentiment']).size().reset_index(name='value')
 
 sources = []
@@ -94,17 +93,14 @@ for _, row in links_df.iterrows():
     sources.append(s_idx)
     targets.append(e_idx)
     values.append(row['value'])
-    # Color by start sentiment
     color = sentiment_colors[row['start_sentiment']]
     link_colors.append(f'rgba({int(color[1:3],16)},{int(color[3:5],16)},{int(color[5:7],16)},0.5)')
 
-# Node colors
 node_colors = []
 for label in node_labels:
     sentiment = label.split(' ')[0].lower()
     node_colors.append(sentiment_colors[sentiment])
 
-# Create Sankey diagram
 fig = go.Figure(data=[go.Sankey(
     node=dict(
         pad=15,
