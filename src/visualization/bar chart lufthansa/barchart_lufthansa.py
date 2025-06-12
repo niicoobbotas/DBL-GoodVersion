@@ -19,19 +19,20 @@ engine = create_engine(f"postgresql+psycopg2://{PG_USER}:{PG_PASSWORD}@{PG_HOST}
 # Query: All Lufthansa tweets with sentiment
 query = f"""
 SELECT 
-    t.id,
+    t.tweet_id,
     t.created_at,
-    c.sentiment
+    c.sentiment_start as sentiment
 FROM tweets t
 JOIN conversations c ON t.in_reply_to_status_id = c.conversation_id
 WHERE t.in_reply_to_status_id IS NOT NULL
   AND t.user_id = {lufthansa_id}
-  AND c.sentiment IS NOT NULL
+  AND c.sentiment_start IS NOT NULL
 ORDER BY t.created_at;
 """
 
 # Run the query and load into DataFrame
-df = pd.read_sql(query, engine)
+with engine.connect() as conn:
+    df = pd.read_sql(query, conn)
 
 # Count sentiment labels
 sentiment_counts = df["sentiment"].value_counts()
