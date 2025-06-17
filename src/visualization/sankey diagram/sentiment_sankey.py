@@ -22,40 +22,18 @@ airline_ids_tuple = tuple(airline_ids)
 
 # Query
 query = f"""
-WITH user_tweets AS (
-    SELECT 
-        t.in_reply_to_status_id as conversation_id,
-        t.created_at,
-        c.sentiment_start,
-        c.sentiment_end
-    FROM tweets t
-    JOIN conversations c ON t.in_reply_to_status_id = c.conversation_id
-    WHERE t.in_reply_to_status_id IS NOT NULL
-      AND t.user_id NOT IN {airline_ids_tuple}
-      AND c.sentiment_start IS NOT NULL
-      AND c.sentiment_end IS NOT NULL
-),
-conversation_stages AS (
-    SELECT 
-        conversation_id,
-        -- first tweet
-        FIRST_VALUE(sentiment_start) OVER (
-            PARTITION BY conversation_id 
-            ORDER BY created_at
-        ) as start_sentiment,
-        -- last tweet
-        LAST_VALUE(sentiment_end) OVER (
-            PARTITION BY conversation_id 
-            ORDER BY created_at
-            ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
-        ) as end_sentiment
-    FROM user_tweets
-)
-SELECT DISTINCT
+SELECT 
     conversation_id,
-    start_sentiment,
-    end_sentiment
-FROM conversation_stages
+    sentiment_start,
+    sentiment_end
+FROM conversations
+WHERE conversation_id IN (
+    SELECT DISTINCT in_reply_to_status_id 
+    FROM tweets 
+    WHERE user_id NOT IN {airline_ids_tuple}
+)
+AND sentiment_start IS NOT NULL
+AND sentiment_end IS NOT NULL
 ORDER BY conversation_id;
 """
 
@@ -64,41 +42,45 @@ with engine.connect() as conn:
     df = pd.read_sql(query, conn)
 
 sentiment_colors = {
-    'positive': '#0072B2',  # Blue
-    'neutral': '#E69F00',   # Orange
-    'negative': '#D55E00'   # Red-Orange
+    'positive': '#0072B2',  
+    'neutral': '#E69F00',   
+    'negative': '#D55E00'   
 }
 
 sentiments = ['positive', 'neutral', 'negative']
 
 # percentages
-start_percentages = df['start_sentiment'].value_counts(normalize=True) * 100
-end_percentages = df['end_sentiment'].value_counts(normalize=True) * 100
+start_percentages = df['sentiment_start'].value_counts(normalize=True) * 100
+end_percentages = df['sentiment_end'].value_counts(normalize=True) * 100
 
 # node labels and indices
 node_labels = []
 node_indices = {}
-for stage, col, percentages in zip(['Start', 'End'], ['start_sentiment', 'end_sentiment'], [start_percentages, end_percentages]):
-    for sentiment in sentiments:
+
+#
+for stage in ['Start', 'End']:
+    col = 'sentiment_start' if stage == 'Start' else 'sentiment_end'
+    percentages = start_percentages if stage == 'Start' else end_percentages
+    for sentiment in ['positive', 'neutral', 'negative']:
         if sentiment in df[col].unique():
             pct = percentages.get(sentiment, 0)
             label = f"{sentiment.capitalize()} ({pct:.1f}%)"
             node_indices[(stage, sentiment)] = len(node_labels)
             node_labels.append(label)
 
-links_df = df.groupby(['start_sentiment', 'end_sentiment']).size().reset_index(name='value')
+links_df = df.groupby(['sentiment_start', 'sentiment_end']).size().reset_index(name='value')
 
 sources = []
 targets = []
 values = []
 link_colors = []
 for _, row in links_df.iterrows():
-    s_idx = node_indices[('Start', row['start_sentiment'])]
-    e_idx = node_indices[('End', row['end_sentiment'])]
+    s_idx = node_indices[('Start', row['sentiment_start'])]
+    e_idx = node_indices[('End', row['sentiment_end'])]
     sources.append(s_idx)
     targets.append(e_idx)
     values.append(row['value'])
-    color = sentiment_colors[row['start_sentiment']]
+    color = sentiment_colors[row['sentiment_start']]
     link_colors.append(f'rgba({int(color[1:3],16)},{int(color[3:5],16)},{int(color[5:7],16)},0.5)')
 
 node_colors = []
@@ -112,7 +94,8 @@ fig = go.Figure(data=[go.Sankey(
         thickness=20,
         line=dict(color="black", width=0.5),
         label=node_labels,
-        color=node_colors
+        color=node_colors,
+        y=[0.1 if 'positive' in label else 0.5 if 'neutral' in label else 0.9 for label in node_labels]
     ),
     link=dict(
         source=sources,
@@ -125,7 +108,8 @@ fig = go.Figure(data=[go.Sankey(
 fig.update_layout(
     title_text="User Tweet Sentiment Flow",
     font_size=12,
-    height=800
+    height=800,
+    margin=dict(t=50, b=50, l=50, r=50)
 )
 
 fig.write_html("src/visualization/sankey diagram/sentiment_sankey.html")
