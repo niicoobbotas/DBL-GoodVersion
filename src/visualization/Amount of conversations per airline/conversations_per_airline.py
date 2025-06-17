@@ -40,5 +40,8 @@ plt.ylabel("Number of Conversations")
 plt.xticks(rotation=45)
 plt.grid(axis='y', linestyle='--', alpha=0.2)
 plt.tight_layout()
-plt.savefig("mention_volume_per_airline.png")
+
+# Save in the same directory as the Python file
+output_path = os.path.join(os.path.dirname(__file__), "conversations_per_airline.png")
+plt.savefig(output_path)
 plt.show()
