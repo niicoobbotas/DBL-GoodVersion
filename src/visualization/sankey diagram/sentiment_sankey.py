@@ -21,19 +21,38 @@ engine = create_engine(f"postgresql+psycopg2://{PG_USER}:{PG_PASSWORD}@{PG_HOST}
 airline_ids_tuple = tuple(airline_ids)
 
 # Query
-query = f"""
-SELECT 
+query = """
+WITH conversation_tweets AS (
+    SELECT 
+        t.in_reply_to_status_id as conversation_id,
+        t.created_at,
+        c.sentiment_start,
+        c.sentiment_end
+    FROM tweets t
+    JOIN conversations c ON t.in_reply_to_status_id = c.conversation_id
+    WHERE t.in_reply_to_status_id IS NOT NULL
+      AND c.sentiment_start IS NOT NULL
+      AND c.sentiment_end IS NOT NULL
+),
+first_last_tweets AS (
+    SELECT DISTINCT
+        conversation_id,
+        FIRST_VALUE(sentiment_start) OVER (
+            PARTITION BY conversation_id 
+            ORDER BY created_at
+        ) as sentiment_start,
+        LAST_VALUE(sentiment_end) OVER (
+            PARTITION BY conversation_id 
+            ORDER BY created_at
+            ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+        ) as sentiment_end
+    FROM conversation_tweets
+)
+SELECT DISTINCT
     conversation_id,
     sentiment_start,
     sentiment_end
-FROM conversations
-WHERE conversation_id IN (
-    SELECT DISTINCT in_reply_to_status_id 
-    FROM tweets 
-    WHERE user_id NOT IN {airline_ids_tuple}
-)
-AND sentiment_start IS NOT NULL
-AND sentiment_end IS NOT NULL
+FROM first_last_tweets
 ORDER BY conversation_id;
 """
 
@@ -57,16 +76,21 @@ end_percentages = df['sentiment_end'].value_counts(normalize=True) * 100
 node_labels = []
 node_indices = {}
 
-#
-for stage in ['Start', 'End']:
-    col = 'sentiment_start' if stage == 'Start' else 'sentiment_end'
-    percentages = start_percentages if stage == 'Start' else end_percentages
-    for sentiment in ['positive', 'neutral', 'negative']:
-        if sentiment in df[col].unique():
-            pct = percentages.get(sentiment, 0)
-            label = f"{sentiment.capitalize()} ({pct:.1f}%)"
-            node_indices[(stage, sentiment)] = len(node_labels)
-            node_labels.append(label)
+# Create nodes in specific order: positive, neutral, negative for both start and end
+for sentiment in ['positive', 'neutral', 'negative']:
+    # Add start node for this sentiment
+    if sentiment in df['sentiment_start'].unique():
+        pct = start_percentages.get(sentiment, 0)
+        label = f"{sentiment.capitalize()} ({pct:.1f}%)"
+        node_indices[('Start', sentiment)] = len(node_labels)
+        node_labels.append(label)
+    
+    # Add end node for this sentiment
+    if sentiment in df['sentiment_end'].unique():
+        pct = end_percentages.get(sentiment, 0)
+        label = f"{sentiment.capitalize()} ({pct:.1f}%)"
+        node_indices[('End', sentiment)] = len(node_labels)
+        node_labels.append(label)
 
 links_df = df.groupby(['sentiment_start', 'sentiment_end']).size().reset_index(name='value')
 
@@ -94,8 +118,7 @@ fig = go.Figure(data=[go.Sankey(
         thickness=20,
         line=dict(color="black", width=0.5),
         label=node_labels,
-        color=node_colors,
-        y=[0.1 if 'positive' in label else 0.5 if 'neutral' in label else 0.9 for label in node_labels]
+        color=node_colors
     ),
     link=dict(
         source=sources,
@@ -106,11 +129,12 @@ fig = go.Figure(data=[go.Sankey(
 )])
 
 fig.update_layout(
-    title_text="User Tweet Sentiment Flow",
+    title_text="Tweet Sentiment Flow",
     font_size=12,
-    height=800,
-    margin=dict(t=50, b=50, l=50, r=50)
+    height=800
 )
 
-fig.write_html("src/visualization/sankey diagram/sentiment_sankey.html")
+# Save in the same directory as the Python file
+output_path = os.path.join(os.path.dirname(__file__), "sentiment_sankey.html")
+fig.write_html(output_path)
 fig.show() 

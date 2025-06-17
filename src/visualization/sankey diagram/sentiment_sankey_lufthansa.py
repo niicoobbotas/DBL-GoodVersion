@@ -17,18 +17,38 @@ engine = create_engine(f"postgresql+psycopg2://{PG_USER}:{PG_PASSWORD}@{PG_HOST}
 
 # Query
 query = f"""
-SELECT 
+WITH conversation_tweets AS (
+    SELECT 
+        t.in_reply_to_status_id as conversation_id,
+        t.created_at,
+        c.sentiment_start,
+        c.sentiment_end
+    FROM tweets t
+    JOIN conversations c ON t.in_reply_to_status_id = c.conversation_id
+    WHERE t.in_reply_to_status_id IS NOT NULL
+      AND t.user_id = {lufthansa_id}
+      AND c.sentiment_start IS NOT NULL
+      AND c.sentiment_end IS NOT NULL
+),
+first_last_tweets AS (
+    SELECT DISTINCT
+        conversation_id,
+        FIRST_VALUE(sentiment_start) OVER (
+            PARTITION BY conversation_id 
+            ORDER BY created_at
+        ) as sentiment_start,
+        LAST_VALUE(sentiment_end) OVER (
+            PARTITION BY conversation_id 
+            ORDER BY created_at
+            ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+        ) as sentiment_end
+    FROM conversation_tweets
+)
+SELECT DISTINCT
     conversation_id,
     sentiment_start,
     sentiment_end
-FROM conversations
-WHERE conversation_id IN (
-    SELECT DISTINCT in_reply_to_status_id 
-    FROM tweets 
-    WHERE user_id = {lufthansa_id}
-)
-AND sentiment_start IS NOT NULL
-AND sentiment_end IS NOT NULL
+FROM first_last_tweets
 ORDER BY conversation_id;
 """
 
