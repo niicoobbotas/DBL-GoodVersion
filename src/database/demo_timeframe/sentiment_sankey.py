@@ -3,6 +3,7 @@ import pandas as pd
 from sqlalchemy import create_engine
 import plotly.graph_objects as go
 
+#date In string format: 'YYYY-MM-DD'
 # ------------------ PARAMETERS TO EDIT ------------------
 exact_date = None
 start_date = None
@@ -23,6 +24,8 @@ PG_PORT     = os.getenv("PG_PORT", "5432")
 PG_DB       = os.getenv("PG_DB", "DBL")
 
 engine = create_engine(f"postgresql+psycopg2://{PG_USER}:{PG_PASSWORD}@{PG_HOST}:{PG_PORT}/{PG_DB}")
+
+print("Database connection established. Ready to execute queries.")
 
 # Function to load Lufthansa tweets
 def load_tweets(engine, exact_date=None, start_date=None, end_date=None, month=None, year=None, week_of_date=None):
@@ -148,6 +151,5 @@ fig.update_layout(
     height=800
 )
 
-fig.write_html("src/visualization/sankey diagram/sentiment_sankey_lufthansa.html")
 fig.show()
 

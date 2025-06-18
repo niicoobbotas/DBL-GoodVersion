@@ -10,6 +10,8 @@ PG_DB       = os.getenv("PG_DB", "DBL")
 
 engine = create_engine(f"postgresql+psycopg2://{PG_USER}:{PG_PASSWORD}@{PG_HOST}:{PG_PORT}/{PG_DB}")
 
+print("Database connection established. Ready to execute queries.")
+
 def load_tweets(engine, exact_date=None, start_date=None, end_date=None, month=None, year=None, week_of_date=None):
     conditions = []
 

@@ -3,6 +3,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sqlalchemy import create_engine
 
+
+#date In string format: 'YYYY-MM-DD'
 # ------------------ PARAMETERS TO EDIT ------------------
 exact_date = None
 start_date = None
@@ -21,6 +23,8 @@ PG_DB       = os.getenv("PG_DB", "DBL")
 
 # Create database engine
 engine = create_engine(f"postgresql+psycopg2://{PG_USER}:{PG_PASSWORD}@{PG_HOST}:{PG_PORT}/{PG_DB}")
+
+print("Database connection established. Ready to execute queries.") 
 
 # Load tweets function
 def load_tweets(engine, exact_date=None, start_date=None, end_date=None, month=None, year=None, week_of_date=None):
@@ -88,8 +92,4 @@ plt.ylabel("Number of Conversations")
 plt.xticks(rotation=45)
 plt.grid(axis='y', linestyle='--', alpha=0.2)
 plt.tight_layout()
-
-# Save in the same directory as the Python file
-output_path = os.path.join(os.path.dirname(__file__), "conversations_per_airline.png")
-plt.savefig(output_path)
 plt.show()

@@ -3,12 +3,15 @@ from sqlalchemy import create_engine
 import pandas as pd
 import matplotlib.pyplot as plt
 
+#date In string format: 'YYYY-MM-DD'
+# ------------------ PARAMETERS TO EDIT ------------------          
 exact_date = None
 start_date = None
 end_date = None
 month = None
 year = None
-week_of_date = None
+week_of_date = None 
+# --------------------------------------------------------
 
 # Database connection parameters
 PG_USER     = os.getenv("PG_USER", "postgres")
@@ -19,6 +22,8 @@ PG_DB       = os.getenv("PG_DB", "DBL")
 
 # Create database engine
 engine = create_engine(f"postgresql+psycopg2://{PG_USER}:{PG_PASSWORD}@{PG_HOST}:{PG_PORT}/{PG_DB}")
+
+print("Database connection established. Ready to execute queries.") 
 
 # Load tweets function
 def load_tweets(engine, exact_date=None, start_date=None, end_date=None, month=None, year=None, week_of_date=None):
@@ -60,6 +65,7 @@ def load_tweets(engine, exact_date=None, start_date=None, end_date=None, month=N
     }
 
     params = {k: v for k, v in params.items() if v is not None}
+    print("Query params:", params)
 
     return pd.read_sql(query, engine, params=params)
 
