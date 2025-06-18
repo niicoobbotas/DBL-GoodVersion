@@ -20,8 +20,8 @@ engine = create_engine(f"postgresql+psycopg2://{PG_USER}:{PG_PASSWORD}@{PG_HOST}
 
 query = """
 SELECT 
-    LOWER(airline) as airline,
-    COUNT(*) as mention_count
+    LOWER(airline) AS airline,
+    COUNT(DISTINCT conversation_id) AS mention_count
 FROM conversations
 WHERE airline IS NOT NULL
 GROUP BY LOWER(airline)
