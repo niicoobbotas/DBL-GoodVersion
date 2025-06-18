@@ -3,7 +3,6 @@ from sqlalchemy import create_engine
 import pandas as pd
 import matplotlib.pyplot as plt
 
-#date In string format: 'YYYY-MM-DD'
 # ------------------ PARAMETERS TO EDIT ------------------          
 exact_date = None
 start_date = None
@@ -22,29 +21,30 @@ PG_DB       = os.getenv("PG_DB", "DBL")
 
 # Create database engine
 engine = create_engine(f"postgresql+psycopg2://{PG_USER}:{PG_PASSWORD}@{PG_HOST}:{PG_PORT}/{PG_DB}")
-
 print("Database connection established. Ready to execute queries.") 
 
-# Load tweets function (no filtering in SQL, all in pandas)
+# Load tweets function (fixed: explicitly select columns and rename to avoid duplicates)
 def load_tweets(engine):
     query = """
     SELECT 
-        t.*, 
-        c.sentiment_start_score, 
+        t.tweet_id,
+        t.created_at,
+        t.user_id AS tweet_user_id,
+        t.in_reply_to_status_id,
+        c.sentiment_start_score,
         c.sentiment_end_score,
         (c.sentiment_start_score + c.sentiment_end_score)/2 AS sentiment_score,
         c.sentiment_start,
-        c.user_id,
-        c.in_reply_to_status_id
+        c.user_id AS conversation_user_id
     FROM tweets t
-    JOIN conversations c ON c.tweet_id = t.tweet_id
+    JOIN conversations c ON t.in_reply_to_status_id = c.conversation_id
     """
     return pd.read_sql(query, engine)
 
 # Load all data
 df = load_tweets(engine)
 
-# Parse created_at as datetime
+# Parse created_at to datetime (avoid warning)
 df['parsed_date'] = pd.to_datetime(df['created_at'], errors='coerce')
 
 # Filter by parameters in pandas
@@ -65,10 +65,12 @@ if week_of_date:
 # Lufthansa user ID
 lufthansa_id = 124476322
 
-# Further filtering for Lufthansa user, reply tweets, and sentiment not null
-df = df[(df['user_id'] == lufthansa_id) & 
-        (df['in_reply_to_status_id'].notnull()) & 
-        (df['sentiment_start'].notnull())]
+# Further filtering (use tweet_user_id to filter Lufthansa tweets)
+df = df[
+    (df['tweet_user_id'] == lufthansa_id) & 
+    (df['in_reply_to_status_id'].notnull()) & 
+    (df['sentiment_start'].notnull())
+]
 
 # Count sentiment labels
 sentiment_counts = df["sentiment_start"].value_counts()
@@ -82,4 +84,3 @@ plt.ylabel("Number of Tweets")
 plt.xticks(rotation=0)
 plt.tight_layout()
 plt.show()
-
