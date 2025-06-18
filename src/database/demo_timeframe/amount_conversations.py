@@ -2,7 +2,9 @@ import os
 import pandas as pd
 import matplotlib.pyplot as plt
 from sqlalchemy import create_engine
+import datetime
 
+from sympy import N
 
 #date In string format: 'YYYY-MM-DD'
 # ------------------ PARAMETERS TO EDIT ------------------
@@ -27,55 +29,36 @@ engine = create_engine(f"postgresql+psycopg2://{PG_USER}:{PG_PASSWORD}@{PG_HOST}
 print("Database connection established. Ready to execute queries.") 
 
 # Load tweets function
-def load_tweets(engine, exact_date=None, start_date=None, end_date=None, month=None, year=None, week_of_date=None):
-    conditions = []
-
-    date_column = "TO_TIMESTAMP(t.created_at, 'YYYY-MM-DD HH24:MI:SS')"
-
-    if exact_date:
-        conditions.append(f"{date_column}::date = %(exact_date)s")
-    if start_date and end_date:
-        conditions.append(f"{date_column} >= %(start_date)s AND {date_column} < %(end_date)s")
-    if month and year:
-        conditions.append(f"EXTRACT(MONTH FROM {date_column}) = %(month)s")
-        conditions.append(f"EXTRACT(YEAR FROM {date_column}) = %(year)s")
-    if week_of_date:
-        conditions.append(f"DATE_TRUNC('week', {date_column}) = DATE_TRUNC('week', %(week_of_date)s::date)")
-
-    where_clause = " AND ".join(conditions) if conditions else "TRUE"
-
-    query = f"""
+def load_tweets(engine):
+    query = """
     SELECT 
         t.*, 
         c.airline
     FROM tweets t
     JOIN conversations c ON c.tweet_id = t.tweet_id
-    WHERE c.airline IS NOT NULL AND {where_clause}
+    WHERE c.airline IS NOT NULL
     """
+    return pd.read_sql(query, engine)
 
-    params = {
-        "exact_date": exact_date,
-        "start_date": start_date,
-        "end_date": end_date,
-        "month": month,
-        "year": year,
-        "week_of_date": week_of_date,
-    }
+# Load data
+df = load_tweets(engine)
 
-    params = {k: v for k, v in params.items() if v is not None}
+# Parse timestamps
+df['parsed_date'] = pd.to_datetime(df['created_at'], format='%a %b %d %H:%M:%S %z %Y', errors='coerce')
 
-    return pd.read_sql(query, engine, params=params)
+# Apply date-based filtering in Pandas
+if exact_date:
+    df = df[df['parsed_date'].dt.date == pd.to_datetime(exact_date).date()]
+if start_date and end_date:
+    df = df[(df['parsed_date'] >= pd.to_datetime(start_date)) & (df['parsed_date'] < pd.to_datetime(end_date))]
+if week_of_date:
+    week_start = pd.to_datetime(week_of_date) - pd.to_timedelta(pd.to_datetime(week_of_date).weekday(), unit='D')
+    week_end = week_start + pd.Timedelta(days=7)
+    df = df[(df['parsed_date'] >= week_start) & (df['parsed_date'] < week_end)]
+if month and year:
+    df = df[(df['parsed_date'].dt.month == month) & (df['parsed_date'].dt.year == year)]
 
-# Load filtered data
-df = load_tweets(
-    engine,
-    exact_date=exact_date,
-    start_date=start_date,
-    end_date=end_date,
-    month=month,
-    year=year,
-    week_of_date=week_of_date
-)
+print("Filtered date range:", df['parsed_date'].min(), "to", df['parsed_date'].max())
 
 # Count conversations per airline
 df['airline'] = df['airline'].str.lower()

@@ -27,78 +27,59 @@ engine = create_engine(f"postgresql+psycopg2://{PG_USER}:{PG_PASSWORD}@{PG_HOST}
 
 print("Database connection established. Ready to execute queries.")
 
-# Function to load Lufthansa tweets
-def load_tweets(engine, exact_date=None, start_date=None, end_date=None, month=None, year=None, week_of_date=None):
-    conditions = []
-
-    date_column = "TO_TIMESTAMP(t.created_at, 'YYYY-MM-DD HH24:MI:SS')"
-
-    if exact_date:
-        conditions.append(f"{date_column}::date = %(exact_date)s")
-    if start_date and end_date:
-        conditions.append(f"{date_column} >= %(start_date)s AND {date_column} < %(end_date)s")
-    if month and year:
-        conditions.append(f"EXTRACT(MONTH FROM {date_column}) = %(month)s")
-        conditions.append(f"EXTRACT(YEAR FROM {date_column}) = %(year)s")
-    if week_of_date:
-        conditions.append(f"DATE_TRUNC('week', {date_column}) = DATE_TRUNC('week', %(week_of_date)s::date)")
-
-    where_clause = " AND ".join(conditions) if conditions else "TRUE"
-
-    query = f"""
+# Function to load Lufthansa tweets (no filtering in SQL)
+def load_tweets(engine):
+    query = """
     SELECT 
-        c.conversation_id,
+        t.*, 
+        c.airline,
         c.sentiment_start,
         c.sentiment_end
-    FROM conversations c
-    WHERE c.conversation_id IN (
-        SELECT DISTINCT t.in_reply_to_status_id 
-        FROM tweets t
-        WHERE t.user_id = {lufthansa_id}
-        AND {where_clause}
-    )
-    AND c.sentiment_start IS NOT NULL
-    AND c.sentiment_end IS NOT NULL
-    ORDER BY c.conversation_id;
+    FROM tweets t
+    JOIN conversations c ON c.tweet_id = t.tweet_id
+    WHERE c.airline IS NOT NULL
     """
+    return pd.read_sql(query, engine)
 
-    params = {
-        "exact_date": exact_date,
-        "start_date": start_date,
-        "end_date": end_date,
-        "month": month,
-        "year": year,
-        "week_of_date": week_of_date,
-    }
+# Load data
+df = load_tweets(engine)
 
-    params = {k: v for k, v in params.items() if v is not None}
+# Parse created_at as datetime
+df['parsed_date'] = pd.to_datetime(df['created_at'], errors='coerce')
 
-    return pd.read_sql(query, engine, params=params)
+# Apply date filtering in pandas
+if exact_date:
+    df = df[df['parsed_date'].dt.date == pd.to_datetime(exact_date).date()]
 
-# Load Lufthansa data
-df = load_tweets(
-    engine,
-    exact_date=exact_date,
-    start_date=start_date,
-    end_date=end_date,
-    month=month,
-    year=year,
-    week_of_date=week_of_date
-)
+if start_date and end_date:
+    df = df[(df['parsed_date'] >= pd.to_datetime(start_date)) & (df['parsed_date'] < pd.to_datetime(end_date))]
 
-# Sankey chart logic
+if month and year:
+    df = df[(df['parsed_date'].dt.month == month) & (df['parsed_date'].dt.year == year)]
+
+if week_of_date:
+    week_start = pd.to_datetime(week_of_date) - pd.to_timedelta(pd.to_datetime(week_of_date).weekday(), unit='d')
+    week_end = week_start + pd.Timedelta(days=7)
+    df = df[(df['parsed_date'] >= week_start) & (df['parsed_date'] < week_end)]
+
+# Filter for Lufthansa airline (if needed, or adjust filter here)
+df = df[df['airline'].str.lower() == 'lufthansa']
+
+# Define sentiment colors
 sentiment_colors = {
-    'positive': '#0072B2',  
-    'neutral': '#E69F00',   
-    'negative': '#D55E00'   
+    'positive': '#0072B2',
+    'neutral': '#E69F00',
+    'negative': '#D55E00'
 }
 
 sentiments = ['positive', 'neutral', 'negative']
 stages = ['Start', 'End']
 
+# Calculate percentages
 start_percentages = df['sentiment_start'].value_counts(normalize=True) * 100
 end_percentages = df['sentiment_end'].value_counts(normalize=True) * 100
 
+# Build node labels and indices
 node_labels = []
 node_indices = {}
 for stage, col, percentages in zip(['Start', 'End'], ['sentiment_start', 'sentiment_end'], [start_percentages, end_percentages]):
@@ -109,6 +90,7 @@ for stage, col, percentages in zip(['Start', 'End'], ['sentiment_start', 'sentim
             node_indices[(stage, sentiment)] = len(node_labels)
             node_labels.append(label)
 
+# Group by start and end sentiments to get link values
 links_df = df.groupby(['sentiment_start', 'sentiment_end']).size().reset_index(name='value')
 
 sources = []
@@ -124,11 +106,13 @@ for _, row in links_df.iterrows():
     color = sentiment_colors[row['sentiment_start']]
     link_colors.append(f'rgba({int(color[1:3],16)},{int(color[3:5],16)},{int(color[5:7],16)},0.5)')
 
+# Node colors based on sentiment
 node_colors = []
 for label in node_labels:
     sentiment = label.split(' ')[0].lower()
     node_colors.append(sentiment_colors[sentiment])
 
+# Create Sankey figure
 fig = go.Figure(data=[go.Sankey(
     node=dict(
         pad=15,
@@ -152,4 +136,3 @@ fig.update_layout(
 )
 
 fig.show()
-

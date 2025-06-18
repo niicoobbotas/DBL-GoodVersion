@@ -1,0 +1,58 @@
+import os
+import pandas as pd
+from sqlalchemy import create_engine
+
+# ------------------ PARAMETERS TO EDIT ------------------
+exact_date = None
+start_date = None
+end_date = None
+month = None       
+year = None       
+week_of_date = None  
+# --------------------------------------------------------
+
+# DB connection setup
+PG_USER     = os.getenv("PG_USER", "postgres")
+PG_PASSWORD = os.getenv("PG_PASSWORD", "DblCork2025")
+PG_HOST     = os.getenv("PG_HOST", "dbl.cjiyqqck0poz.eu-west-1.rds.amazonaws.com")
+PG_PORT     = os.getenv("PG_PORT", "5432")
+PG_DB       = os.getenv("PG_DB", "DBL")
+
+engine = create_engine(f"postgresql+psycopg2://{PG_USER}:{PG_PASSWORD}@{PG_HOST}:{PG_PORT}/{PG_DB}")
+print("Connected to database.")
+
+# Load all tweets
+def load_all_tweets(engine):
+    query = """
+    SELECT 
+        t.*, 
+        c.airline
+    FROM tweets t
+    JOIN conversations c ON c.tweet_id = t.tweet_id
+    WHERE c.airline IS NOT NULL
+    """
+    return pd.read_sql(query, engine)
+
+# Load and parse
+df = load_all_tweets(engine)
+df['parsed_date'] = pd.to_datetime(df['created_at'], errors='coerce')
+
+# Filter in pandas
+if exact_date:
+    df = df[df['parsed_date'].dt.date == pd.to_datetime(exact_date).date()]
+
+if start_date and end_date:
+    df = df[(df['parsed_date'] >= pd.to_datetime(start_date)) &
+            (df['parsed_date'] < pd.to_datetime(end_date))]
+
+if month and year:
+    df = df[(df['parsed_date'].dt.month == month) &
+            (df['parsed_date'].dt.year == year)]
+
+if week_of_date:
+    week_start = pd.to_datetime(week_of_date)
+    week_end = week_start + pd.Timedelta(days=7)
+    df = df[(df['parsed_date'] >= week_start) & (df['parsed_date'] < week_end)]
+
+# Show result
+print(df.head())

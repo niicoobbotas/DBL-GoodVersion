@@ -5,12 +5,12 @@ import plotly.graph_objects as go
 
 #date In string format: 'YYYY-MM-DD'
 # ------------------ PARAMETERS TO EDIT ------------------
-exact_date = None
-start_date = None
-end_date = None
-month = None
-year = None
-week_of_date = None
+exact_date = None           
+start_date = None           
+end_date = None             
+month = None               
+year = None                 
+week_of_date = None         
 # --------------------------------------------------------
 
 airline_ids = {
@@ -29,72 +29,46 @@ engine = create_engine(f"postgresql+psycopg2://{PG_USER}:{PG_PASSWORD}@{PG_HOST}
 
 print("Database connection established. Ready to execute queries.")
 
-# Load tweets function
-def load_tweets(engine, exact_date=None, start_date=None, end_date=None, month=None, year=None, week_of_date=None):
-    conditions = []
-
-    date_column = "TO_TIMESTAMP(t.created_at, 'YYYY-MM-DD HH24:MI:SS')"
-
-    if exact_date:
-        conditions.append(f"{date_column}::date = %(exact_date)s")
-    if start_date and end_date:
-        conditions.append(f"{date_column} >= %(start_date)s AND {date_column} < %(end_date)s")
-    if month and year:
-        conditions.append(f"EXTRACT(MONTH FROM {date_column}) = %(month)s")
-        conditions.append(f"EXTRACT(YEAR FROM {date_column}) = %(year)s")
-    if week_of_date:
-        conditions.append(f"DATE_TRUNC('week', {date_column}) = DATE_TRUNC('week', %(week_of_date)s::date)")
-
-    where_clause = " AND ".join(conditions) if conditions else "TRUE"
-
-    airline_ids_tuple = tuple(airline_ids)
-
-    query = f"""
+# Load tweets function (unfiltered SQL)
+def load_tweets(engine):
+    query = """
     SELECT 
-        c.conversation_id,
+        t.*, 
+        c.airline,
         c.sentiment_start,
         c.sentiment_end
-    FROM conversations c
-    WHERE c.conversation_id IN (
-        SELECT DISTINCT t.in_reply_to_status_id 
-        FROM tweets t
-        WHERE t.user_id NOT IN {airline_ids_tuple}
-        AND {where_clause}
-    )
-    AND c.sentiment_start IS NOT NULL
-    AND c.sentiment_end IS NOT NULL
-    ORDER BY c.conversation_id;
+    FROM tweets t
+    JOIN conversations c ON c.tweet_id = t.tweet_id
+    WHERE c.airline IS NOT NULL
     """
-
-    params = {
-        "exact_date": exact_date,
-        "start_date": start_date,
-        "end_date": end_date,
-        "month": month,
-        "year": year,
-        "week_of_date": week_of_date,
-    }
-
-    params = {k: v for k, v in params.items() if v is not None}
-
-    return pd.read_sql(query, engine, params=params)
+    return pd.read_sql(query, engine)
 
 # Load data
-df = load_tweets(
-    engine,
-    exact_date=exact_date,
-    start_date=start_date,
-    end_date=end_date,
-    month=month,
-    year=year,
-    week_of_date=week_of_date
-)
+df = load_tweets(engine)
+
+# Parse created_at as datetime
+df['parsed_date'] = pd.to_datetime(df['created_at'], errors='coerce')
+
+# Apply date filtering in pandas
+if exact_date:
+    df = df[df['parsed_date'].dt.date == pd.to_datetime(exact_date).date()]
+
+if start_date and end_date:
+    df = df[(df['parsed_date'] >= pd.to_datetime(start_date)) & (df['parsed_date'] < pd.to_datetime(end_date))]
+
+if month and year:
+    df = df[(df['parsed_date'].dt.month == month) & (df['parsed_date'].dt.year == year)]
+
+if week_of_date:
+    week_start = pd.to_datetime(week_of_date) - pd.to_timedelta(pd.to_datetime(week_of_date).weekday(), unit='d')
+    week_end = week_start + pd.Timedelta(days=7)
+    df = df[(df['parsed_date'] >= week_start) & (df['parsed_date'] < week_end)]
 
 # Plotting Sankey diagram
 sentiment_colors = {
-    'positive': '#0072B2',  
-    'neutral': '#E69F00',   
-    'negative': '#D55E00'   
+    'positive': '#0072B2',
+    'neutral': '#E69F00',
+    'negative': '#D55E00'
 }
 
 start_percentages = df['sentiment_start'].value_counts(normalize=True) * 100
