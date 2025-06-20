@@ -54,4 +54,4 @@ Database connection and query code is located in `src/database/`. This contains 
 
 ## License
 
-[Your chosen license]
+MIT License
